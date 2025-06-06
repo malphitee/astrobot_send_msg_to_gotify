@@ -118,7 +118,7 @@ class GotifyForwarderPlugin(Star):
     def _build_message(self, event: AstrMessageEvent, message_content: str) -> Dict[str, Any]:
         """构建要发送的消息"""
         # 获取基本信息
-        sender_name = event.get_sender_name()
+        sender_name = self._get_sender_display_name(event)
         sender_id = event.get_sender_id()
         platform = event.get_platform_name()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -153,6 +153,140 @@ class GotifyForwarderPlugin(Star):
             "message": message,
             "priority": self.config.get("gotify_priority", 5)
         }
+    
+    def _get_sender_display_name(self, event: AstrMessageEvent) -> str:
+        """智能获取发送者显示名称，针对不同平台进行优化"""
+        try:
+            # 首先尝试获取标准的发送者姓名
+            sender_name = event.get_sender_name()
+            
+            # 如果获取到有效的姓名且不为空，直接返回
+            if sender_name and sender_name.strip():
+                return sender_name.strip()
+            
+            # 如果没有获取到姓名，尝试从原始消息对象中提取
+            platform = event.get_platform_name().lower()
+            sender_id = event.get_sender_id()
+            
+            # 根据平台特性进行特殊处理
+            if platform == "telegram":
+                display_name = self._get_telegram_display_name(event)
+                if display_name:
+                    return display_name
+                    
+            elif platform in ["qq", "aiocqhttp"]:
+                # QQ 平台通常使用昵称或QQ号
+                display_name = self._get_qq_display_name(event)
+                if display_name:
+                    return display_name
+                    
+            elif platform in ["wechat", "gewechat"]:
+                # 微信平台使用微信昵称
+                display_name = self._get_wechat_display_name(event)
+                if display_name:
+                    return display_name
+            
+            # 如果所有方法都无法获取姓名，使用用户ID作为后备
+            return f"用户_{sender_id}" if sender_id else "未知用户"
+            
+        except Exception as e:
+            logger.warning(f"Gotify 转发插件：获取发送者姓名时发生错误：{e}")
+            return f"用户_{event.get_sender_id()}" if event.get_sender_id() else "未知用户"
+    
+    def _get_telegram_display_name(self, event: AstrMessageEvent) -> str:
+        """获取 Telegram 用户的显示名称"""
+        try:
+            # 尝试从原始消息中获取用户信息
+            raw_message = event.message_obj.raw_message
+            
+            if hasattr(raw_message, 'from_user') or isinstance(raw_message, dict):
+                # 处理字典格式的原始消息
+                if isinstance(raw_message, dict):
+                    from_user = raw_message.get('from_user') or raw_message.get('from')
+                else:
+                    from_user = getattr(raw_message, 'from_user', None)
+                
+                if from_user:
+                    # 尝试获取用户信息
+                    if isinstance(from_user, dict):
+                        first_name = from_user.get('first_name', '')
+                        last_name = from_user.get('last_name', '')
+                        username = from_user.get('username', '')
+                    else:
+                        first_name = getattr(from_user, 'first_name', '')
+                        last_name = getattr(from_user, 'last_name', '')
+                        username = getattr(from_user, 'username', '')
+                    
+                    # 构建显示名称
+                    display_name = ''
+                    if first_name:
+                        display_name = first_name
+                        if last_name:
+                            display_name += f" {last_name}"
+                    elif username:
+                        display_name = f"@{username}"
+                    
+                    if display_name.strip():
+                        return display_name.strip()
+            
+            # 如果无法从原始消息获取，尝试其他方法
+            sender = event.message_obj.sender
+            if hasattr(sender, 'nickname') and sender.nickname:
+                return sender.nickname
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Gotify 转发插件：获取 Telegram 用户信息失败：{e}")
+            return None
+    
+    def _get_qq_display_name(self, event: AstrMessageEvent) -> str:
+        """获取 QQ 用户的显示名称"""
+        try:
+            sender = event.message_obj.sender
+            
+            # 尝试获取昵称、群名片等
+            if hasattr(sender, 'nickname') and sender.nickname:
+                return sender.nickname
+            elif hasattr(sender, 'card') and sender.card:
+                return sender.card
+            elif hasattr(sender, 'title') and sender.title:
+                return sender.title
+                
+            # 如果都没有，返回QQ号
+            sender_id = event.get_sender_id()
+            if sender_id:
+                return f"QQ用户_{sender_id}"
+                
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Gotify 转发插件：获取 QQ 用户信息失败：{e}")
+            return None
+    
+    def _get_wechat_display_name(self, event: AstrMessageEvent) -> str:
+        """获取微信用户的显示名称"""
+        try:
+            sender = event.message_obj.sender
+            
+            # 尝试获取微信昵称
+            if hasattr(sender, 'nickname') and sender.nickname:
+                return sender.nickname
+            elif hasattr(sender, 'remark') and sender.remark:
+                return sender.remark
+                
+            # 尝试从原始消息获取
+            raw_message = event.message_obj.raw_message
+            if isinstance(raw_message, dict):
+                name = raw_message.get('sender_name') or raw_message.get('nickname')
+                if name:
+                    return name
+                    
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Gotify 转发插件：获取微信用户信息失败：{e}")
+            return None
     
     async def _send_to_gotify(self, message_data: Dict[str, Any]) -> bool:
         """发送消息到 Gotify"""
@@ -235,3 +369,71 @@ class GotifyForwarderPlugin(Star):
         status_lines.append(f"📝 详细日志：{'已启用' if self.config.get('enable_logging', True) else '已禁用'}")
         
         yield event.plain_result("\n".join(status_lines))
+
+    @filter.command("gotify_debug")
+    async def debug_message_info(self, event: AstrMessageEvent):
+        """调试指令：查看消息事件的详细信息"""
+        try:
+            debug_info = []
+            debug_info.append("🐞 Gotify 插件调试信息")
+            debug_info.append("=" * 30)
+            
+            # 基本信息
+            debug_info.append(f"平台：{event.get_platform_name()}")
+            debug_info.append(f"发送者ID：{event.get_sender_id()}")
+            debug_info.append(f"标准获取姓名：{repr(event.get_sender_name())}")
+            debug_info.append(f"智能获取姓名：{repr(self._get_sender_display_name(event))}")
+            
+            # 发送者对象信息
+            sender = event.message_obj.sender
+            debug_info.append("\n📋 发送者对象信息：")
+            debug_info.append(f"发送者对象类型：{type(sender)}")
+            
+            if hasattr(sender, '__dict__'):
+                for attr, value in sender.__dict__.items():
+                    debug_info.append(f"  {attr}: {repr(value)}")
+            else:
+                debug_info.append("  发送者对象无 __dict__ 属性")
+            
+            # 原始消息信息
+            raw_message = event.message_obj.raw_message
+            debug_info.append("\n📄 原始消息信息：")
+            debug_info.append(f"原始消息类型：{type(raw_message)}")
+            
+            if isinstance(raw_message, dict):
+                debug_info.append("原始消息内容（部分）：")
+                for key in ['from_user', 'from', 'sender_name', 'nickname', 'user_id', 'chat']:
+                    if key in raw_message:
+                        debug_info.append(f"  {key}: {repr(raw_message[key])}")
+            elif hasattr(raw_message, '__dict__'):
+                debug_info.append("原始消息属性（部分）：")
+                for attr in ['from_user', 'from', 'sender_name', 'nickname', 'user_id']:
+                    if hasattr(raw_message, attr):
+                        value = getattr(raw_message, attr)
+                        debug_info.append(f"  {attr}: {repr(value)}")
+            
+            # Telegram 特殊处理
+            if event.get_platform_name().lower() == "telegram":
+                debug_info.append("\n💬 Telegram 特殊信息：")
+                try:
+                    if isinstance(raw_message, dict):
+                        from_user = raw_message.get('from_user') or raw_message.get('from')
+                        if from_user:
+                            debug_info.append(f"  from_user/from: {repr(from_user)}")
+                            if isinstance(from_user, dict):
+                                for key in ['id', 'first_name', 'last_name', 'username', 'language_code']:
+                                    if key in from_user:
+                                        debug_info.append(f"    {key}: {repr(from_user[key])}")
+                except Exception as e:
+                    debug_info.append(f"  获取 Telegram 信息时出错: {e}")
+            
+            result = "\n".join(debug_info)
+            
+            # 限制输出长度，避免消息过长
+            if len(result) > 4000:
+                result = result[:4000] + "\n...(信息过长，已截断)"
+                
+            yield event.plain_result(result)
+            
+        except Exception as e:
+            yield event.plain_result(f"❌ 调试信息获取失败：{e}")
