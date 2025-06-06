@@ -1,0 +1,76 @@
+{
+  "gotify_server": {
+    "description": "Gotify 服务器地址",
+    "type": "string",
+    "hint": "Gotify 服务器的完整 URL，例如：https://push.example.com",
+    "default": ""
+  },
+  "gotify_token": {
+    "description": "Gotify 应用令牌",
+    "type": "string", 
+    "hint": "在 Gotify 管理后台创建应用后获得的 Token",
+    "default": ""
+  },
+  "monitored_users": {
+    "description": "监听的用户 ID 列表",
+    "type": "list",
+    "hint": "要监听消息的用户 ID（QQ 号等），多个用户用列表形式添加",
+    "default": []
+  },
+  "filter_keywords": {
+    "description": "关键词过滤设置",
+    "type": "object",
+    "hint": "配置消息过滤规则",
+    "items": {
+      "enable_filter": {
+        "description": "启用关键词过滤",
+        "type": "bool",
+        "hint": "是否开启关键词过滤功能",
+        "default": false
+      },
+      "include_keywords": {
+        "description": "包含关键词",
+        "type": "list",
+        "hint": "消息必须包含这些关键词之一才会转发，为空则不限制",
+        "default": []
+      },
+      "exclude_keywords": {
+        "description": "排除关键词", 
+        "type": "list",
+        "hint": "包含这些关键词的消息将不会转发",
+        "default": []
+      }
+    }
+  },
+  "message_template": {
+    "description": "消息模板设置",
+    "type": "object",
+    "hint": "自定义转发到 Gotify 的消息格式",
+    "items": {
+      "title_template": {
+        "description": "消息标题模板",
+        "type": "string",
+        "hint": "支持变量：{sender_name}, {user_id}, {timestamp}",
+        "default": "来自 {sender_name} 的消息"
+      },
+      "message_template": {
+        "description": "消息内容模板", 
+        "type": "text",
+        "hint": "支持变量：{sender_name}, {user_id}, {message_content}, {timestamp}, {platform}",
+        "default": "发送者：{sender_name}\n时间：{timestamp}\n内容：{message_content}"
+      }
+    }
+  },
+  "gotify_priority": {
+    "description": "Gotify 消息优先级",
+    "type": "int",
+    "hint": "消息优先级（0-10），数字越大优先级越高",
+    "default": 5
+  },
+  "enable_logging": {
+    "description": "启用详细日志",
+    "type": "bool",
+    "hint": "是否记录详细的转发日志",
+    "default": true
+  }
+} 
